@@ -10,14 +10,20 @@
 #include <time.h>
 
 #define BUFLEN 100
+#define MAXNUMFILES 25
+#define PEERNAMESIZE 10
 
 const char REGISTER_REQ= 'R';
-const char DOWNLOAD_REQ = 'D';
 const char SEARCH_REQ = 'S';
 const char DE_REGISTER_REQ = 'T';
 const char LIST_REQ = 'O';
 const char ACK_REQ = 'A';
-const char ERROR_EQ = 'E';
+const char ERROR_REQ = 'E';
+
+char content_name_values[MAXNUMFILES][10];
+char peer_name_values[MAXNUMFILES][10];
+char client_address_values[MAXNUMFILES][79];
+int numClients = 0;
 
 struct pdu {
     char type;
@@ -41,17 +47,98 @@ void deserialize(struct pdu pdu_, char buffer[BUFLEN]) {
 	}
 }
 
-void register_client_server(struct pdu server_info) {
-
+int findIndexOfRecord(char peerName[10], char fileName[10]) {
+	int i;
+	for(i=0; i < numClients; i++) {
+		if( strcmp(peer_name_values[i], peerName) && strcmp(content_name_values[i], fileName)) {
+			return i;
+		}
+	}
+	return -1;
 }
 
-void deregister_client_server(struct pdu server_info) {
+struct pdu register_client_server(struct pdu req) {
+	int i;
+	struct pdu resPdu;
+	char peerName[10];
+	char fileName[10];
+	for (i=0; i <10; i++) {
+		peerName[i] = req.data[1+i];
+		fileName[i] = req.data[11+i];
+	}
 
+	if( findIndexOfRecord(peerName, fileName) == -1 && numClients < MAXNUMFILES) {
+		numClients++;
+		for(i = 0; i < PEERNAMESIZE; i++) {
+			peer_name_values[numClients][i] = peerName[i];
+			content_name_values[numClients][i] = fileName[i];
+		}
+		for(i = 0; i < 79; i++)
+			client_address_values[numClients][i] = req.data[i+21];
+		resPdu.type = ACK_REQ;
+	} else {
+		resPdu.type = ERROR_REQ;
+	}
+	return resPdu;
 }
 
-struct pdu find_client_server_for_file(char fileName[100]) {
+struct pdu deregister_client_server(struct pdu req) {
+	int i;
+	struct pdu resPdu;
+	char peerName[10];
+	char fileName[10];
+		for (i=0; i <10; i++) {
+		peerName[i] = req.data[1+i];
+		fileName[i] = req.data[11+i];
+	}
+	int index = findIndexOfRecord(peerName, fileName);
+	if(index > -1) {
+		for (i=0; i <10; i++) {
+			peer_name_values[index][i] = '\0';
+			content_name_values[index][i] = '\0';
+		}
+		resPdu.type = ACK_REQ;
+	} else {
+		resPdu.type = ERROR_REQ;
+	}
 
+	return resPdu;
 }
+
+struct pdu find_client_server_for_file(char fileName[10]) {
+
+	int i;
+	struct pdu resPdu;
+	int lastIndx= -1;
+	for(i = 0; i < numClients; i++) {
+		if(strcmp(content_name_values[i], fileName)) {
+			lastIndx = i;
+		}
+	}
+	if(lastIndx > -1) {
+		resPdu.type = SEARCH_REQ;
+		strcpy(resPdu.data, client_address_values[lastIndx]);
+	} else {
+		resPdu.type = ERROR_REQ;
+		strcpy(resPdu.data, "File not found");
+	}
+	return resPdu;
+}
+
+struct pdu list_files_in_library() {
+	int i;
+	int j;
+	int total_indx = 0;
+	struct pdu tmpPdu;
+	tmpPdu.type = SEARCH_REQ;
+	for(i = 0; i < numClients; i++) {
+		for(j=0; j < 10; j++){
+			tmpPdu.data[total_indx++] = content_name_values[numClients][j];
+		}
+	}
+	return tmpPdu;
+}
+
 
 /*------------------------------------------------------------------------
  * Driver of Index Server
@@ -107,45 +194,32 @@ main(int argc, char *argv[])
 			//fprintf(stderr,"%c",buffer[0]);
 			int i;
 			for(i = 0; i < BUFLEN-1; i++) req_pdu.data[i] = req_buffer[i+1];
-
-		if(req_pdu.type == 'C') {
-			fprintf(stderr,"requesting file %s", req_pdu.data);
-			FILE *file = fopen(req_pdu.data, "rb");
-            if (file == NULL) {
-                res_pdu.type = 'E';
-				strcpy(res_pdu.data,"404: File not found");
-				serialize(res_pdu.type,res_pdu.data, res_buffer);
-				(void) sendto(s, res_buffer, sizeof(res_buffer), 0,
-				(struct sockaddr *)&fsin, sizeof(fsin));
-                continue;
-            }
-			
-			fseek(file, 0L, SEEK_END);
-			int file_size = ftell(file);
-			fseek(file, 0L, SEEK_SET);
-
-			int total_bytes_sent = 0;
-			int numBytes = 0;
-
-			while( (numBytes = fread(res_pdu.data, 1, sizeof(res_pdu.data), file)) > 0){
-				total_bytes_sent += numBytes;
-				if(total_bytes_sent == file_size) res_pdu.type = 'F';
-				else res_pdu.type = 'D';
-				fprintf(stderr,"Data sent: %d\n", total_bytes_sent);
-				fprintf(stderr, "Numbytes: %d\n", numBytes);
-				fprintf(stderr, "type: %c\n", res_pdu.type);
-				serialize(res_pdu.type,res_pdu.data, res_buffer);
-				(void) sendto(s, res_buffer, sizeof(res_buffer), 0,
-				(struct sockaddr *)&fsin, sizeof(fsin));
-			}
-			fclose(file);	
-		} else {
-			printf("Unsopported request");
-			res_pdu.type = 'E';
-			strcpy(res_pdu.data, "Unsupported request");
-			serialize(res_pdu.type, res_pdu.data, res_buffer);
-			(void) sendto(s, res_buffer, sizeof(res_buffer), 0,
-			(struct sockaddr *)&fsin, sizeof(fsin));
+		
+		switch(req_pdu.type) {
+			case REGISTER_REQ:
+				fprintf(stderr,"request to register file received %s\n", req_pdu.data);
+				res_pdu = register_client_server(req_pdu);
+				continue;
+			case DE_REGISTER_REQ:
+				fprintf(stderr,"request to deregister file received %s\n", req_pdu.data);
+				res_pdu = deregister_client_server(req_pdu);
+				continue;
+			case SEARCH_REQ:
+				fprintf(stderr,"request to search fo file received %s\n", req_pdu.data);
+				res_pdu = find_client_server_for_file(req_pdu.data);
+				break;
+			case LIST_REQ:
+				fprintf(stderr,"request to list files received: %s\n", req_pdu.data);
+				res_pdu = list_files_in_library();
+				break;
+			case ERROR_REQ:
+			default:
+				fprintf(stderr,"Error received %s", req_pdu.data);
+				res_pdu.type = ERROR_REQ;
+				strcpy(res_pdu.data, "Unsupported request");	
 		}
+		serialize(res_pdu.type,res_pdu.data, res_buffer);
+		(void) sendto(s, res_buffer, sizeof(res_buffer), 0,
+		(struct sockaddr *)&fsin, sizeof(fsin));
 	}
 }
