@@ -37,9 +37,10 @@ void receive_tcp_response(int socket, char* response, size_t response_size);
 
 void handle_error_response(char response_type);
 
-char peer_name[11], std_buf[100], *host = "localhost", req_buffer[100], file_req_buffer[1640];
+char peer_name[11], std_buf[100], *host = "localhost", req_buffer[100], file_req_buffer[1640], res_buffer[100], peerName[10];
 int port = 3000, mode=0, indx_sock;
 fd_set afds, rfds;
+struct pdu req_pdu, res_pdu;
 
 void serialize(char type,  char* data, size_t data_size ,char buffer[BUFLEN]) {
 	buffer[0] = type;
@@ -76,7 +77,7 @@ int display_menu() {
 	break;
 	case 3:
 		printf("Listing available content");
-		handle_list_and_download();
+		//handle_list_and_download();
 	break;
 	}
     
@@ -97,16 +98,29 @@ void handle_std_input() {
 		case 1:
 			scanf("%d", &str_input);
 			handle_register_content();
+			mode=0;
 		break;
 		case 2:
 			scanf("%d", &str_input);
 			handle_deregister_content();
+			mode=0;
 		break;
 	}
 }
 
-void handle_socket_input() {
-
+void handle_socket_input(int socket) {
+	int j;
+	int i;
+	while (j != 0) { /*repeatedly reading until termination*/
+	j = read(socket, res_buffer, BUFLEN);
+	if(j <0 ){
+		printf("Error");
+		close(socket);
+	}
+	}
+	res_pdu.type = res_buffer[0];
+	for(i = 0; i < sizeof(res_buffer)-1; i++) res_pdu.data[i] = res_buffer[i+1];
+	printf(res_pdu.type);
 }
 
 void handle_register_content() {
@@ -120,8 +134,11 @@ void handle_register_content() {
 	alen = sizeof (struct sockaddr_in);
 	getsockname(s, (struct sockaddr *) &reg_addr, &alen);
 	printf("Socket port: %d", reg_addr.sin_port);
-	printf("Socket addr: %s", reg_addr.sin_addr);
-	//make udp connection to register content using filename
+	printf("Socket addr: %s", reg_addr.sin_addr.s_addr);
+
+	
+	req_pdu.type = "R";
+	memcpy(&req_pdu.data, "test", 10);
 }
 
 void handle_deregister_content() {
@@ -154,7 +171,7 @@ main(int argc, char **argv){
 
 	struct hostent	*phe;	/* pointer to host information entry	*/
 	struct sockaddr_in sin;	/* an Internet endpoint address		*/
-	int	s, n, j, type;	/* socket descriptor and socket type	*/
+	int	s, n, j, type, fds_indx;	/* socket descriptor and socket type	*/
 	char req_buffer[101], res_buffer[101];
 
 
@@ -184,6 +201,9 @@ main(int argc, char **argv){
 		exit(1);
 	}
 
+	printf("Please enter a peer name: ");
+	scanf("%s", peer_name);
+
 	//creating socket for udp server connection.
 	/* Map host name to IP address, allowing for dotted decimal */
 	if ( phe = gethostbyname(host) ){
@@ -212,7 +232,11 @@ main(int argc, char **argv){
 	if(FD_ISSET(0, &rfds)) {
 		handle_std_input();
 	} else {
-		handle_socket_input();
+		for(fds_indx=1; fds_indx < FD_SETSIZE; fds_indx++) {
+			if(FD_ISSET(fds_indx, &rfds)) {
+				handle_socket_input(fds_indx);
+			}
+		}
 	}
 
 	}

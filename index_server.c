@@ -130,7 +130,7 @@ struct pdu list_files_in_library() {
 	int j;
 	int total_indx = 0;
 	struct pdu tmpPdu;
-	tmpPdu.type = SEARCH_REQ;
+	tmpPdu.type = 'O';
 	for(i = 0; i < numClients; i++) {
 		for(j=0; j < 10; j++){
 			tmpPdu.data[total_indx++] = content_name_values[numClients][j];
@@ -196,23 +196,23 @@ main(int argc, char *argv[])
 			for(i = 0; i < BUFLEN-1; i++) req_pdu.data[i] = req_buffer[i+1];
 		
 		switch(req_pdu.type) {
-			case REGISTER_REQ:
+			case 'R':
 				fprintf(stderr,"request to register file received %s\n", req_pdu.data);
 				res_pdu = register_client_server(req_pdu);
 				continue;
-			case DE_REGISTER_REQ:
+			case 'T':
 				fprintf(stderr,"request to deregister file received %s\n", req_pdu.data);
 				res_pdu = deregister_client_server(req_pdu);
 				continue;
-			case SEARCH_REQ:
+			case 'S':
 				fprintf(stderr,"request to search fo file received %s\n", req_pdu.data);
 				res_pdu = find_client_server_for_file(req_pdu.data);
 				break;
-			case LIST_REQ:
+			case 'O':
 				fprintf(stderr,"request to list files received: %s\n", req_pdu.data);
 				res_pdu = list_files_in_library();
 				break;
-			case ERROR_REQ:
+			case 'E':
 			default:
 				fprintf(stderr,"Error received %s", req_pdu.data);
 				res_pdu.type = ERROR_REQ;
