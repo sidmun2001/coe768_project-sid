@@ -10,7 +10,7 @@
 #include <time.h>
 
 #define BUFLEN 100
-#define MAXNUMFILES 25
+#define MAXNUMFILES 5
 #define PEERNAMESIZE 10
 
 const char REGISTER_REQ= 'R';
@@ -20,10 +20,16 @@ const char LIST_REQ = 'O';
 const char ACK_REQ = 'A';
 const char ERROR_REQ = 'E';
 
-char content_name_values[MAXNUMFILES][10];
-char peer_name_values[MAXNUMFILES][10];
-char client_address_values[MAXNUMFILES][79];
+char content_name_values[MAXNUMFILES][11];
+char peer_name_values[MAXNUMFILES][11];
+char ip_values[MAXNUMFILES][10];
+in_port_t client_port_values[MAXNUMFILES];
 int numClients = 0;
+
+struct pdu req_pdu, res_pdu;
+char req_buffer[100], res_buffer[100], test_buf[50];
+in_port_t receiving_port;
+
 
 struct pdu {
     char type;
@@ -57,27 +63,45 @@ int findIndexOfRecord(char peerName[10], char fileName[10]) {
 	return -1;
 }
 
-struct pdu register_client_server(struct pdu req) {
+struct pdu register_client_server(struct pdu req, struct sockaddr_in sockadd) {
 	int i;
 	struct pdu resPdu;
-	char peerName[10];
-	char fileName[10];
-	for (i=0; i <10; i++) {
-		peerName[i] = req.data[1+i];
-		fileName[i] = req.data[11+i];
-	}
+	char peerName[11];
+	char fileName[11];
+	char ip_sent[10];
 
+	strncpy(peerName, req_pdu.data, sizeof(peerName));
+	strncpy(fileName, req_pdu.data + 11, sizeof(fileName));
+	strncpy(ip_sent, req_pdu.data + 22, sizeof(ip_sent));
+	memcpy(&receiving_port, req.data+32, sizeof(receiving_port));
+
+	
+	fprintf(stderr, "peer name: %s\n", peerName);
+	fprintf(stderr, "file name: %s\n",fileName);
+	fprintf(stderr, "Port Number: %d\n", ntohs(receiving_port));
+	fprintf(stderr, "IP: %s\n", ip_sent);
 	if( findIndexOfRecord(peerName, fileName) == -1 && numClients < MAXNUMFILES) {
-		numClients++;
-		for(i = 0; i < PEERNAMESIZE; i++) {
-			peer_name_values[numClients][i] = peerName[i];
-			content_name_values[numClients][i] = fileName[i];
-		}
-		for(i = 0; i < 79; i++)
-			client_address_values[numClients][i] = req.data[i+21];
-		resPdu.type = ACK_REQ;
+	
+	numClients++;
+	
+	strncpy(peer_name_values[numClients], peerName, sizeof(peer_name_values[numClients]));
+	strncpy(content_name_values[numClients], fileName, sizeof(content_name_values[numClients]));
+	strncpy(ip_values[numClients], ip_sent, sizeof(ip_values[numClients]));
+	client_port_values[numClients] = receiving_port;
+
+	
+
+	fprintf(stderr,"%s\n", peer_name_values[numClients]);
+	fprintf(stderr,"%s\n", content_name_values[numClients]);
+	fprintf(stderr,"%d\n", ntohs(client_port_values[numClients]));	
+	fprintf(stderr,"%s\n", ip_values[numClients]);
+	
+
+	
+	resPdu.type = 'A';
+
 	} else {
-		resPdu.type = ERROR_REQ;
+		resPdu.type = 'E';
 	}
 	return resPdu;
 }
@@ -117,7 +141,7 @@ struct pdu find_client_server_for_file(char fileName[10]) {
 	}
 	if(lastIndx > -1) {
 		resPdu.type = SEARCH_REQ;
-		strcpy(resPdu.data, client_address_values[lastIndx]);
+		strcpy(resPdu.data, client_port_values[lastIndx]);
 	} else {
 		resPdu.type = ERROR_REQ;
 		strcpy(resPdu.data, "File not found");
@@ -131,11 +155,9 @@ struct pdu list_files_in_library() {
 	int total_indx = 0;
 	struct pdu tmpPdu;
 	tmpPdu.type = 'O';
-	for(i = 0; i < numClients; i++) {
-		for(j=0; j < 10; j++){
-			tmpPdu.data[total_indx++] = content_name_values[numClients][j];
-		}
-	}
+	
+	memcpy(tmpPdu.data, content_name_values, sizeof(tmpPdu.data));
+	
 	return tmpPdu;
 }
 
@@ -153,8 +175,8 @@ main(int argc, char *argv[])
 	struct  sockaddr_in sin; /* an Internet endpoint address         */
         int     s, type;        /* socket descriptor and socket type    */
 	int 	port=3000;
-	struct pdu req_pdu, res_pdu;
-	char req_buffer[100], res_buffer[100], test_buf[50];
+	
+
                                                                                 
 
 	switch(argc){
@@ -177,29 +199,30 @@ main(int argc, char *argv[])
         s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s < 0)
 		fprintf(stderr, "can't creat socket\n");
-                                                                                
+                                                      
     /* Bind the socket */
         if (bind(s, (struct sockaddr *)&sin, sizeof(sin)) < 0)
-		fprintf(stderr, "can't bind to %d port\n",port);
+		fprintf(stderr, "can't bind to %d port\n",port);;
         listen(s, 5);	
 	alen = sizeof(fsin);
-
 	while (1) {
 		
+		fprintf(stderr, "receive");
 		if (recvfrom(s, req_buffer, sizeof(req_buffer), 0,
 				(struct sockaddr *)&fsin, &alen) < 0)
 			fprintf(stderr, "recvfrom error\n");
+ 			fprintf(stderr, "receiving");
 		
 			req_pdu.type = req_buffer[0];
-			//fprintf(stderr,"%c",buffer[0]);
+			fprintf(stderr," request received: %c\n",req_buffer[0]);
 			int i;
 			for(i = 0; i < BUFLEN-1; i++) req_pdu.data[i] = req_buffer[i+1];
 		
 		switch(req_pdu.type) {
 			case 'R':
-				fprintf(stderr,"request to register file received %s\n", req_pdu.data);
-				res_pdu = register_client_server(req_pdu);
-				continue;
+				res_pdu = register_client_server(req_pdu, fsin);
+				break;
+				
 			case 'T':
 				fprintf(stderr,"request to deregister file received %s\n", req_pdu.data);
 				res_pdu = deregister_client_server(req_pdu);
