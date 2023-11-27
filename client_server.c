@@ -28,19 +28,20 @@ void handle_list_and_download(void);
 void clode_application(void);
 void handle_std_input(void);
 void handle_list_content(int udp_socket, struct sockaddr_in index_server);
-void handle_search_content(int udp_socket, struct sockaddr_in index_server);
-void handle_download_content(int tcp_socket, struct sockaddr_in client);
+void handle_search_content();
+void handle_download_content(struct sockaddr_in sockarr, char filename[11]);
+void handle_upload_content(int tcp_socket, struct sockaddr_in client);
 
 void send_udp_request();
-void send_tcp_request();
+void send_tcp_request(int socket);
 
 void receive_udp_response(int socket, char* response, size_t response_size);
 void receive_tcp_response(int socket, char* response, size_t response_size);
 
 void handle_error_response(char response_type);
 
-char peer_name[11], std_buf[100], req_buffer[100], file_req_buffer[1640], res_buffer[100], std_input[100], ip_add[10];
-int mode=0, indx_sock;
+char peer_name[11], std_buf[100], req_buffer[100], file_req_buffer[1640], file_res_buffer[1640], res_buffer[100], std_input[100], ip_add[10], filenames[MAXFILES][11];
+int mode=0, indx_sock, did_list=0, file_indx;
 fd_set afds, rfds;
 struct pdu req_pdu, res_pdu;
 
@@ -57,7 +58,7 @@ void deserialize() {
 	memset(res_buffer, 0, sizeof(res_buffer));
 }
 
-int display_menu() {
+void display_menu() {
 
 	switch(mode) {
 	case 0:
@@ -78,8 +79,11 @@ int display_menu() {
 		printf("Please enter the filename");
 	break;
 	case 3:
+		if(did_list == 0) {
 		printf("====Listing available content====\n");
+		printf("Select the corresponding file number to download or 0 to exit: \n");
 		handle_list_and_download();
+		}
 	break;
 	}
     
@@ -103,10 +107,13 @@ void handle_std_input() {
 			printf("file registered");
 		break;
 		case 2:
-			scanf("%d", &std_input);
+			scanf("%s", std_input);
 			handle_deregister_content();
 			mode=0;
 		break;
+		case 3:
+			scanf("%d", &file_indx);
+			handle_search_content();
 	}
 }
 
@@ -132,32 +139,49 @@ void handle_socket_input(int socket) {
 		}
 		break;
 		case 1: {
-			if(res_pdu.type = 'A') {
+			if(res_pdu.type == 'A') {
 				printf("Acknowledgement received\n");
 				mode=0;
-			} else if(res_pdu.type = 'E') {
+			} else if(res_pdu.type == 'E') {
 				printf("Error registering content: %s\n", res_pdu.data);
 				mode = 0;
 			} else {
 				printf("Unsupported request");
 			}
 		}
+		break;
+		case 2:
+			printf("deregistering content");
+		break;
+		case 3:
+			handle_search_content();
 	}
 }
 
 void handle_list_and_download() {
-	int i, loopactive=1, j;
-	char filenames[MAXFILES][11];
+	int i, loopactive=1, j, offset=0;
 	req_pdu.type = 'O';
 	send_udp_request();
-	j = read(indx_sock, res_buffer, BUFLEN);
-	if(j < 0) printf("error");
+	if(read(indx_sock, res_buffer, BUFLEN) < 0){
+		printf("error");
+		mode=0;
+		return;
+	}
 	serialize();
 	printf("response recived of type: %c\n", res_pdu.type);
-
-	memcpy(filenames, res_pdu.data, sizeof(filenames));
-	for(i=0; i< MAXFILES; i++)
+	if(res_pdu.type == 'O') {
+		for(i=0; i< MAXFILES; i++) {
+		strncpy(filenames[i], res_pdu.data + offset, sizeof(filenames[i]) );
 		printf("%d: %s\n",i, filenames[i]);
+		offset += strlen(filenames[i] + 1);
+		}
+		did_list = 1;
+	} else if(res_pdu.type == 'E'){
+		printf("Received error\n");
+		printf("%s", res_pdu.data);
+		mode=0;
+	}
+
 }
 
 void handle_register_content() {
@@ -169,8 +193,7 @@ void handle_register_content() {
 	reg_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	bind(sock_id, (struct sockaddr *)&reg_addr, sizeof(reg_addr));
 	alen = sizeof (struct sockaddr_in);
-	getsockname(sock_id, (struct sockaddr *) &reg_addr, &alen);
-	printf("Socket port: %d\n", reg_addr.sin_port);
+	getsockname(sock_id, (struct sockaddr *) &reg_addr, (socklen_t *) &alen);
 	req_pdu.type = 'R';
 	memcpy(req_pdu.data, peer_name , strlen(peer_name));
 	memcpy(req_pdu.data+11, std_input , strlen(std_input));
@@ -178,20 +201,17 @@ void handle_register_content() {
 	memcpy(req_pdu.data+32, &reg_addr.sin_port , sizeof(reg_addr.sin_port));
 	send_udp_request();
 	printf("Data send to server. Awaiting acknowledgement....\n");
-	while(loopactive) {
-		j = read(indx_sock, res_buffer, BUFLEN);
-		if(j < 0) printf("Error");
-		if(res_buffer[0] = 'A'){
-			printf("Acknowledgment received\n");
-			loopactive=0;
-			mode=0;
-		} else if(res_buffer[0] = 'E') {
-			loopactive=0;
-			mode=0;
-			printf("File already registered");
-		} 
+	if(read(indx_sock, res_buffer, BUFLEN) < 0) {
+		printf("Error\n");
+		mode=0;
 	}
-	
+	if(res_buffer[0] == 'A'){
+		printf("Acknowledgment received\n");
+		mode=0;
+	} else if(res_buffer[0] == 'E') {
+		mode=0;
+		printf("File already registered");
+	} 
 }
 
 void handle_deregister_content() {
@@ -199,13 +219,75 @@ void handle_deregister_content() {
 	//close socket and thread
 }
 
-void handle_list_content(int udp_socket, struct sockaddr_in index_server) {
-	//make udp connection to find content
-	printf("Files available for download: \n");
+void handle_download_content(struct sockaddr_in sockarr, char filename[11]) {
+	int sock, loopend=1, j, total_bytes_received=0;
+	FILE *clientfileptr;
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock < 0)
+	printf("Can't create socket \n");
+	clientfileptr = fopen(filename, "wb");
+
+																			
+/* Connect the socket */
+	if (connect(sock, (struct sockaddr *)&sockarr, sizeof(sockarr)) < 0)
+		printf("Can't connect to file download host \n");
+	while (loopend == 1) { 
+		if(read(sock, file_res_buffer, BUFLEN)){
+			printf("Error");
+			close(sock);
+			loopend=0;
+		}
+		if(file_res_buffer[0] == 'C') {
+			fwrite(file_res_buffer + 1, 1, j, clientfileptr);
+			printf("%d bytes written", j);
+			total_bytes_received += j;
+			if(sizeof(file_res_buffer) < 1640) {
+				loopend=0;
+			}
+		} else {
+			printf("Error in downloading file");
+			loopend=0;
+		}
+	}
+	printf("file Received: %s", filename);
+	printf("Total bytes received: %d", total_bytes_received);
+	mode=0;
+	close(sock);
 }
 
-void handle_search_content(int udp_socket, struct sockaddr_in index_server) {
-	printf("Searching for content: %s", std_buf);
+void handle_search_content() {
+	char ip_addr[10];
+	int loopend=1;
+
+	in_port_t receiving_port;
+	struct sockaddr_in file_client_sin;
+	struct hostent	*phe;
+	//init new socket address
+	memset(&file_client_sin, 0, sizeof(file_client_sin));
+	file_client_sin.sin_family = AF_INET;    
+
+	printf("Searching for content: %s", std_input);
+	req_pdu.type = 'S';
+	strncpy(req_pdu.data, filenames[file_indx], sizeof(filenames[file_indx]));
+	send_udp_request();
+	if(read(indx_sock, res_buffer, BUFLEN) < 0) {
+		printf("Error reading search file");
+		mode=0;
+		return;
+	}
+	serialize();
+	if(res_pdu.type == 'S') {
+		strncpy(ip_addr, res_pdu.data, sizeof(ip_addr));
+		memcpy(&file_client_sin.sin_port, res_pdu.data+11, sizeof(receiving_port));
+		if ( (phe = gethostbyname(ip_addr) )){
+			memcpy(&file_client_sin.sin_addr, phe->h_addr, phe->h_length);
+			handle_download_content(file_client_sin, filenames[file_indx]);
+		}
+
+	} else if(res_pdu.type == 'E') {
+		printf("Error received: %s\n", res_pdu.data);
+	}
+
 }
 
 void send_udp_request() {
@@ -260,7 +342,7 @@ main(int argc, char **argv){
 
 	//creating socket for udp server connection.
 	/* Map host name to IP address, allowing for dotted decimal */
-	if ( phe = gethostbyname(host) ){
+	if ( (phe = gethostbyname(host) )){
 			memcpy(&sin.sin_addr, phe->h_addr, phe->h_length);
 	}
 	else if ( (sin.sin_addr.s_addr = inet_addr(host)) == INADDR_NONE )
