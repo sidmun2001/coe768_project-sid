@@ -204,7 +204,7 @@ struct pdu list_files_in_library() {
 	tmpPdu.type = 'O';
 	fprintf(stderr, "\n====Listing Files====\n");
 	fprintf(stderr, "Files in library: %d\n", numuniqueVals);
-    for (int i = 0; i < numuniqueVals; ++i) {
+    for (i = 0; i < numuniqueVals; ++i) {
 		str_len = strlen(unique_content_name_values[i]);
 		for(j = 0; j < str_len; j++) {
 			tmpPdu.data[h++] = unique_content_name_values[i][j];
