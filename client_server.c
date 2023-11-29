@@ -141,9 +141,6 @@ void handle_socket_input(int socket) {
 	}
 	deserialize();
 	printf("received request of type: %c\n", res_pdu.type);
-	if(res_pdu.type == 'D') {
-		//handle_upload_content(socket, );
-	}
 	switch(mode) {
 		case 0: {
 			if(res_pdu.type == 'D') {
@@ -280,7 +277,7 @@ int listen_for_incomming_download_req(int sock_id, struct sockaddr_in sock_descr
 					if(req_buf[0]=='D')
 						exit(handle_upload_content(new_sd, client, tmpfilename));
 				} else {
-					printf("unsupported request");
+					printf("unsupported request\n");
 					exit(1);
 				}
 			}
@@ -377,7 +374,7 @@ void handle_download_content(struct sockaddr_in sockarr, char filename[11]) {
 			total_bytes_received += j-1;
 
 			//if file buffer is not full then we assume file is done transmitting.
-			if(j < 1640) {
+			if(total_bytes_received >= file_size) {
 				printf("File should be done now....\n");
 				loopend=0;
 			}

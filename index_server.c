@@ -10,14 +10,16 @@
 #include <time.h>
 
 #define BUFLEN 100
-#define MAXNUMFILES 5
+#define MAXNUMFILES 9
 
 char content_name_values[MAXNUMFILES][11];
+char unique_content_name_values[MAXNUMFILES][11];
 char peer_name_values[MAXNUMFILES][11];
 char ip_values[MAXNUMFILES][10];
 in_port_t client_port_values[MAXNUMFILES];
 int num_times_read[MAXNUMFILES];
 int numClients = 0;
+int numuniqueVals=0;
 
 struct pdu req_pdu, res_pdu;
 char req_buffer[100], res_buffer[100], test_buf[50];
@@ -55,6 +57,26 @@ int findIndexOfRecord(char peerName[10], char fileName[10]) {
 	return -1;
 }
 
+int findIndexOfFilename(char fileName[10]) {
+	int i;
+	for(i=0; i < numClients; i++) {
+		if( strcmp(content_name_values[i], fileName) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int findIndexOfUniqueFileName(char fileName[10]) {
+	int i;
+	for(i=0; i < numuniqueVals; i++) {
+		if( strcmp(unique_content_name_values[i], fileName) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 struct pdu register_client_server(struct pdu req, struct sockaddr_in sockadd) {
 	int i;
 	struct pdu resPdu;
@@ -75,6 +97,10 @@ struct pdu register_client_server(struct pdu req, struct sockaddr_in sockadd) {
 	strncpy(ip_values[numClients], ip_sent, sizeof(ip_values[numClients]));
 	client_port_values[numClients] = receiving_port;
 	numClients++;
+	if(findIndexOfUniqueFileName(fileName) < 0) {
+		strncpy(unique_content_name_values[numuniqueVals], fileName, sizeof(unique_content_name_values[numuniqueVals]));
+		numuniqueVals++;
+	}
 	fprintf(stderr, "File registered.. Sending back acknlowledgement\n");
 	resPdu.type = 'A';
 	} else if(numClients >= MAXNUMFILES) {
@@ -90,14 +116,14 @@ struct pdu register_client_server(struct pdu req, struct sockaddr_in sockadd) {
 }
 
 struct pdu deregister_client_server(struct pdu req) {
-	int i;
+	int i, unique_indx, j;
 	struct pdu resPdu;
 	char peerName[10];
 	char fileName[10];
 	strncpy(fileName, req.data, sizeof(fileName));
 	strncpy(peerName, req.data + 11, sizeof(peerName));
 	fprintf(stderr, "\n=====Deregistering file=====\n");
-	fprintf(stderr, "Filename is: %s\n Peer is: %s\n", fileName, peerName);
+	fprintf(stderr, "Filename is: %s\nPeer is: %s\n", fileName, peerName);
 	int index = findIndexOfRecord(peerName, fileName);
 	if(index > -1) {
 		//if non-last value is deregistered move all values back one index.
@@ -115,6 +141,18 @@ struct pdu deregister_client_server(struct pdu req) {
 		client_port_values[numClients-1] = 0;
 		num_times_read[numClients-1] = 0;
 		numClients--;
+		
+		//ammends unique name array if no more copies of file exist in index records.
+		if(findIndexOfFilename(fileName) < 0) {
+			unique_indx = findIndexOfUniqueFileName(fileName);
+			if(unique_indx >= 0) {
+				for(j=unique_indx; j < numuniqueVals; j++) {
+					strncpy(unique_content_name_values[j], unique_content_name_values[j+1], sizeof(unique_content_name_values[j+1]));
+				}
+				memset(unique_content_name_values[unique_indx], '\0', sizeof(unique_content_name_values[unique_indx]));
+				numuniqueVals--;
+			}
+		}
 
 		fprintf(stderr,"File deregistered.. Sending Acknowledgment \n");
 		resPdu.type = 'A';
@@ -165,14 +203,14 @@ struct pdu list_files_in_library() {
 	struct pdu tmpPdu;
 	tmpPdu.type = 'O';
 	fprintf(stderr, "\n====Listing Files====\n");
-	fprintf(stderr, "Files in library: %d\n", numClients);
-    for (int i = 0; i < numClients; ++i) {
-		str_len = strlen(content_name_values[i]);
+	fprintf(stderr, "Files in library: %d\n", numuniqueVals);
+    for (int i = 0; i < numuniqueVals; ++i) {
+		str_len = strlen(unique_content_name_values[i]);
 		for(j = 0; j < str_len; j++) {
-			tmpPdu.data[h++] = content_name_values[i][j];
+			tmpPdu.data[h++] = unique_content_name_values[i][j];
 		}
-		if(i < numClients-1) tmpPdu.data[h++] = ':';
-		fprintf(stderr, "%d. %s\n", i+1, content_name_values[i]);
+		if(i < numuniqueVals-1) tmpPdu.data[h++] = ':';
+		fprintf(stderr, "%d. %s\n", i+1, unique_content_name_values[i]);
     }
 	tmpPdu.data[h] = '\0';
 	return tmpPdu;
