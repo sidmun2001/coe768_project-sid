@@ -67,6 +67,16 @@ int findIndexOfFilename(char fileName[10]) {
 	return -1;
 }
 
+int findIndexOfPeerName(char peerName[10]) {
+	int i;
+	for(i=0; i < numClients; i++) {
+		if( strcmp(peer_name_values[i], peerName) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 int findIndexOfUniqueFileName(char fileName[10]) {
 	int i;
 	for(i=0; i < numuniqueVals; i++) {
@@ -161,6 +171,48 @@ struct pdu deregister_client_server(struct pdu req) {
 		resPdu.type = 'E';
 	}
 
+	return resPdu;
+}
+
+struct pdu deregister_all_client_server(struct pdu req) {
+	int i, unique_indx, j, index;
+	struct pdu resPdu;
+	char peerName[11], fileName[11];
+	strncpy(peerName, req.data, sizeof(peerName));
+	fprintf(stderr, "\n=====Deregistering file=====\n");
+	fprintf(stderr, "Peer is: %s\n", peerName);
+	while((index = findIndexOfPeerName(peerName)) > -1){
+		//if non-last value is deregistered move all values back one index.
+		strncpy(fileName, content_name_values[i], sizeof(content_name_values[i]));
+		for(i = index; i < numClients -1; i++) {
+			strncpy(content_name_values[i], content_name_values[i+1], sizeof(content_name_values[i+1]));
+			strncpy(peer_name_values[i], peer_name_values[i+1], sizeof(peer_name_values[i+1]));
+			strncpy(ip_values[i], ip_values[i+1], sizeof(ip_values[i+1]));
+			client_port_values[i] = client_port_values[i+1];
+			num_times_read[i] = num_times_read[i+1];
+		}
+		//clear last value of array and decrement numclients
+		memset(content_name_values[numClients-1], '\0', sizeof(content_name_values[numClients-1]));
+		memset(peer_name_values[numClients-1], '\0', sizeof(peer_name_values[numClients-1]));
+		memset(ip_values[numClients-1], '\0', sizeof(ip_values[numClients-1]));
+		client_port_values[numClients-1] = 0;
+		num_times_read[numClients-1] = 0;
+		numClients--;
+		
+		//ammends unique name array if no more copies of file exist in index records.
+		if(findIndexOfFilename(fileName) < 0) {
+			unique_indx = findIndexOfUniqueFileName(fileName);
+			if(unique_indx >= 0) {
+				for(j=unique_indx; j < numuniqueVals; j++) {
+					strncpy(unique_content_name_values[j], unique_content_name_values[j+1], sizeof(unique_content_name_values[j+1]));
+				}
+				memset(unique_content_name_values[unique_indx], '\0', sizeof(unique_content_name_values[unique_indx]));
+				numuniqueVals--;
+			}
+		}
+	}
+		fprintf(stderr,"Client deregistered.. Sending Acknowledgment \n");
+		resPdu.type = 'A';
 	return resPdu;
 }
 
@@ -283,6 +335,8 @@ main(int argc, char *argv[])
 			case 'O':
 				res_pdu = list_files_in_library();
 				break;
+			case 'Q':
+				res_pdu = deregister_all_client_server(res_pdu);
 			case 'E':
 			default:
 				fprintf(stderr,"\n=====Unsupported request received %s=====\n", req_pdu.data);
