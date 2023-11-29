@@ -130,6 +130,7 @@ struct pdu find_client_server_for_file(char fileName[10]) {
 
 	int i;
 	struct pdu resPdu;
+	in_port_t testport;
 	int lastIndx= -1;
 	int lastNumTimesRead = -1;
 	fprintf(stderr,"\n=====Searching for file=====\n");
@@ -147,6 +148,8 @@ struct pdu find_client_server_for_file(char fileName[10]) {
 		resPdu.type = 'S';
 		memcpy(resPdu.data, ip_values[lastIndx] , sizeof(ip_values[lastIndx]));
 		memcpy(resPdu.data + 10, &client_port_values[lastIndx] , sizeof(client_port_values[lastIndx]));
+		memcpy(&testport, resPdu.data + 10, sizeof(testport));
+		fprintf(stderr, "IP of server is %s\nPort is: %d\n",resPdu.data, ntohs(testport));
 		num_times_read[lastIndx] ++;
 	} else {
 		fprintf(stderr,"File not found\n");

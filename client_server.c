@@ -22,6 +22,11 @@ struct pdu {
     char data[BUFLEN-1];
 };
 
+struct filePdu {
+	char type;
+	char data[FILEDATABUFFLEN-1];
+};
+
 void handle_register_content();
 void handle_deregister_content(void);
 void handle_list_and_download(void);
@@ -226,6 +231,7 @@ void handle_register_content() {
 	memcpy(req_pdu.data+11, std_input , strlen(std_input));
 	memcpy(req_pdu.data+22, ip_add , sizeof(ip_add));
 	memcpy(req_pdu.data+32, &reg_addr.sin_port , sizeof(reg_addr.sin_port));
+	printf("Port is %d\n", ntohs(reg_addr.sin_port));
 
 	send_udp_request();
 	printf("Data send to server. Awaiting acknowledgement....\n");
@@ -259,40 +265,61 @@ int listen_for_incomming_download_req(int sock_id, struct sockaddr_in sock_descr
 	//filename buffer is subject to change so copy contents to temporary memory address
 	strncpy(tmpfilename, filename, sizeof(tmpfilename));
 	listen(sock_id, 5);
-	client_len = sizeof(client);
-	new_sd = accept(sock_id, (struct sockaddr *)&client, (unsigned int *) &client_len);
-
 	while(1) {
-		if( ( n=read(new_sd, req_buf, BUFLEN) ) > 0 ) {	
-			if(req_buf[0] == 'D') {
-				switch(fork()){
-				case 0:
-					printf("child process handling upload content\n");
-					exit(handle_upload_content(new_sd, client, tmpfilename));
-				default:
-					printf("parent\n");
-					break;
+		client_len = sizeof(client);
+		new_sd = accept(sock_id, (struct sockaddr *)&client, (unsigned int *) &client_len);
+		if(new_sd < 0){
+			printf("Can't accept client \n");
+			exit(1);
+	  } else{
+			printf("New client accepted\n");
+			switch(fork()){
+			case 0: {
+				printf("child process handling upload content\n");
+				if( (n=read(new_sd, req_buf, BUFLEN) ) > 0 ) {
+					if(req_buf[0]=='D')
+						exit(handle_upload_content(new_sd, client, tmpfilename));
+				} else {
+					printf("unsupported request");
+					exit(1);
 				}
 			}
-		}
-	}
+			default:
+				break;
+			}
+	  }
+	}	
 	return 0;
 }
 
 int handle_upload_content(int tcp_socket, struct sockaddr_in client, char filename[11]) {
 	FILE 	*file_ptr;
 	file_ptr = fopen(filename, "rb");
-	int numBytes;
+	int numBytes=0, totalBytes=0, file_size;
+	int32_t tmp_file_size;
+	char tmpFileBuffer[FILEDATABUFFLEN-1];
+	printf("\n===== Handling file download request =====\n");
 	if(file_ptr == NULL){
 		write(tcp_socket, "E", 1); 
 		close(tcp_socket);
 	} else {
-		
-		while((numBytes = fread(file_req_buffer, 1, sizeof(file_req_buffer), file_ptr)) > 0){
-			write(tcp_socket, file_req_buffer, numBytes);
-		}
+			//retreive file size
+			fseek(file_ptr, 0L, SEEK_END);
+			file_size = ftell(file_ptr);
+			tmp_file_size = htonl(file_size);
+			fseek(file_ptr, 0L, SEEK_SET);
+			write(tcp_socket, &file_size, sizeof(int));
+
+			while((numBytes = fread(tmpFileBuffer, 1, sizeof(tmpFileBuffer), file_ptr)) > 0){
+				file_req_buffer[0] = 'C';
+				memcpy(file_req_buffer+1, tmpFileBuffer, sizeof(tmpFileBuffer));
+				write(tcp_socket, file_req_buffer, numBytes+sizeof(file_req_buffer[0]));
+				printf("%d bytes uploaded...\n", numBytes);
+				totalBytes += numBytes;
+			}
 		fclose(file_ptr);	
 	}
+	printf("Total bytes of %d bytes sent.\n", totalBytes);
 	close(tcp_socket);
 	return 0;
 }
@@ -324,33 +351,34 @@ void handle_deregister_content() {
 
 void handle_download_content(struct sockaddr_in sockarr, char filename[11]) {
 	//socket init stuff
-	int sock, loopend=1, j, total_bytes_received=0;
+	int sock, loopend=1, j, total_bytes_received=0, file_size;
 	FILE *clientfileptr;
-	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0)
 	printf("Can't create socket \n");
 	
 	//creating file with filename
 	clientfileptr = fopen(filename, "wb");
-																	
+	printf("===== Downloading Content =====\n");																
 /* Connect the socket */
 	if (connect(sock, (struct sockaddr *)&sockarr, sizeof(sockarr)) < 0)
 		printf("Can't connect to file download host \n");
+	write(sock, "D", sizeof("D"));
+	//read file size first and then read file
+	read(sock, &file_size, sizeof(int));
 	//loop until file finished transmitting.
 	while (loopend == 1) { 
-		if(read(sock, file_res_buffer, BUFLEN)){
-			printf("Error");
-			close(sock);
-			loopend=0;
-		}
+		j = read(sock, file_res_buffer, FILEDATABUFFLEN);
+		printf("%d bytes received... of type %c\n", j, file_res_buffer[0]);
 		if(file_res_buffer[0] == 'C') {
 			//write data to file
-			fwrite(file_res_buffer + 1, 1, j, clientfileptr);
-			printf("%d bytes written\n", j);
-			total_bytes_received += j;
+			fwrite(file_res_buffer+1, 1, j-sizeof(file_res_buffer[0]), clientfileptr);
+			//write(1, file_res_buffer, j);
+			total_bytes_received += j-1;
 
 			//if file buffer is not full then we assume file is done transmitting.
-			if(sizeof(file_res_buffer) < 1640) {
+			if(j < 1640) {
+				printf("File should be done now....\n");
 				loopend=0;
 			}
 		} else {
@@ -358,9 +386,9 @@ void handle_download_content(struct sockaddr_in sockarr, char filename[11]) {
 			loopend=0;
 		}
 	}
+	fclose(clientfileptr);
 	printf("file Received: %s\n", filename);
-	printf("Total bytes received: %d\n", total_bytes_received);
-
+	printf("Received %d/%d bytes....\n", total_bytes_received, file_size);
 	//need to set input buffer for register operation
 	strncpy(std_input, filename, sizeof(std_input));
 	handle_register_content();
@@ -396,11 +424,11 @@ void handle_search_content(int file_indx) {
 	//if request is S we should receive ip and port of client with file.
 	if(res_pdu.type == 'S') {
 		//init socket stuff
-		printf("client ip is: %s\n", res_pdu.data);
-		printf("client port is: %d\n", ntohs(res_pdu.data+11));
 		strncpy(ip_addr, res_pdu.data, sizeof(ip_addr));
-		memcpy(&file_client_sin.sin_port, res_pdu.data+11, sizeof(receiving_port));
-
+		memcpy(&receiving_port, res_pdu.data+10, sizeof(receiving_port));
+		file_client_sin.sin_port = receiving_port;
+		printf("client ip is: %s\n", ip_addr);
+		printf("client port is: %d\n", ntohs(&file_client_sin.sin_port));
 		if ( (phe = gethostbyname(ip_addr) )){
 			memcpy(&file_client_sin.sin_addr, phe->h_addr, phe->h_length);
 			//send client address to handle_download_content
