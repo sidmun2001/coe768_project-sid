@@ -322,29 +322,46 @@ int handle_upload_content(int tcp_socket, struct sockaddr_in client, char filena
 }
 
 void handle_deregister_content() {
-	printf("\n=====Deregistering file=====\n");
-	printf("Filename is: %s\n", std_input);
-	req_pdu.type = 'T';
-	//retreiving filename from command line input buffer
-	memcpy(req_pdu.data, std_input , strlen(std_input));
-	memcpy(req_pdu.data+11, peer_name , strlen(peer_name));
-	send_udp_request();
-	printf("Deregister request sent. Awaiting Acknlowledgement.....\n");
+    printf("\n===== Deregistering File =====\n");
+    printf("Filename is: %s\n", std_input);
 
-	//reading response from udp index server
-	if(read(indx_sock, res_buffer, BUFLEN) < 0) {
-		printf("Error reading search file\n");
-		mode=0;
-		return;
-	}
-	deserialize();
-	if(res_pdu.type == 'A') {
-		printf("Acknowledgment received. File deregistered!\n");
-	} else if(res_pdu.type == 'E') {
-		printf("Error received: %s\n", res_buffer+1);
-	}
-	mode=0;
+    // Set the PDU type for deregistration
+    req_pdu.type = 'T';
+
+    // Clear the data field and populate it correctly
+    memset(req_pdu.data, 0, sizeof(req_pdu.data));
+
+    // Copy the filename and peer name into the appropriate positions
+    memcpy(req_pdu.data, std_input, strlen(std_input)); // Filename
+    memcpy(req_pdu.data + 11, peer_name, strlen(peer_name)); // Peer name
+
+    // Send the deregistration request
+    send_udp_request();
+
+    printf("Deregister request sent. Awaiting Acknowledgement...\n");
+
+    // Wait for response from the UDP index server
+    if (read(indx_sock, res_buffer, BUFLEN) < 0) {
+        printf("Error reading response from index server.\n");
+        mode = 0;
+        return;
+    }
+
+    // Deserialize the response
+    deserialize();
+
+    if (res_pdu.type == 'A') {
+        printf("Acknowledgment received. File deregistered successfully!\n");
+    } else if (res_pdu.type == 'E') {
+        printf("Error received: %s\n", res_pdu.data);
+    } else {
+        printf("Unexpected response type: %c\n", res_pdu.type);
+    }
+
+    // Reset the mode to the main menu
+    mode = 0;
 }
+
 
 void handle_download_content(struct sockaddr_in sockarr, char filename[11]) {
 	//socket init stuff
